@@ -937,10 +937,11 @@ static int mediatek_handle_scanmode_cmd(struct driver_cmd_context* ctx) {
 /**
  * mediatek_handle_generic_command - Send a generic command through testmode
  * @ctx: Driver command context
+ * @handled: Set to 0 if driver doesn't support testmode string commands
  *
  * Returns: Length of response or negative on error
  */
-static int mediatek_handle_generic_command(struct driver_cmd_context* ctx) {
+static int mediatek_handle_generic_command(struct driver_cmd_context* ctx, int* handled) {
     u8 buffer[sizeof(struct wpa_driver_cmd_reply_params) + 4096];
     struct wpa_driver_cmd_reply_params* params = (struct wpa_driver_cmd_reply_params*)buffer;
     int result;
@@ -953,6 +954,10 @@ static int mediatek_handle_generic_command(struct driver_cmd_context* ctx) {
     os_memcpy((char*)(params + 1), ctx->cmd, os_strlen(ctx->cmd) + 1);
 
     result = mediatek_testmode_send(ctx->bss, buffer, params->hdr.buflen);
+    if (result == -EOPNOTSUPP) {
+        *handled = 0;
+        return 0;
+    }
 
     if (result != 0 && params->reply_info.reply_len == 0) {
         os_strlcpy(ctx->buf, "FAILED", ctx->buf_len);
@@ -1091,9 +1096,8 @@ static int mediatek_process_driver_cmd(struct driver_cmd_context* ctx, int* hand
     } else if (os_strncasecmp(ctx->cmd, "setScanMode ", 12) == 0) {
         ret = mediatek_handle_scanmode_cmd(ctx);
     } else {
-        /* Pass other commands via testmode command interface */
-        ret = mediatek_handle_generic_command(ctx);
-        *handled = (ret >= 0);
+        /* Pass other commands via testmode, fall back to ioctl if unsupported */
+        ret = mediatek_handle_generic_command(ctx, handled);
     }
 
     return ret;
