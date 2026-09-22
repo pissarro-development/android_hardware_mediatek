@@ -785,6 +785,40 @@ static void mediatek_log_station_stats(struct wpa_driver_sta_statistics_s* s) {
 }
 
 /**
+ * mediatek_handle_sta_stats_cmd - Handle GET_STA_STATISTICS command
+ * @wpa_s: wpa_supplicant data
+ * @addr: Station MAC address string
+ * @buf: Buffer for command response
+ * @buflen: Length of buffer
+ *
+ * Returns: Length of response or negative on error
+ */
+static int mediatek_handle_sta_stats_cmd(struct wpa_supplicant* wpa_s, char* addr, char* buf,
+                                         size_t buflen) {
+    struct wpa_driver_sta_statistics_s stats;
+    u8 sta_addr[ETH_ALEN];
+    u8* mac;
+
+    os_memset(&stats, 0, sizeof(stats));
+
+    if (hwaddr_aton(addr, sta_addr)) {
+        wpa_printf(MSG_ERROR, "MediaTek: Invalid station address '%s'", addr);
+        return -1;
+    }
+
+    mac = mediatek_get_p2p_addr(wpa_s, sta_addr);
+
+    if (mediatek_get_station_stats(wpa_s, mac ? mac : sta_addr, (u8*)&stats) < 0) {
+        wpa_printf(MSG_ERROR, "MediaTek: Failed to get station statistics");
+        return -1;
+    }
+
+    mediatek_log_station_stats(&stats);
+
+    return mediatek_format_station_stats(&stats, buf, buflen);
+}
+
+/**
  * mediatek_handle_p2p_noa_cmd - Handle P2P NoA command
  * @wpa_s: wpa_supplicant data
  * @cmd: Command string
@@ -984,6 +1018,9 @@ static int mediatek_process_driver_cmd(struct driver_cmd_context* ctx, int* hand
         int state = atoi(ctx->cmd + 10);
         wpa_printf(MSG_DEBUG, "MediaTek: Setting power mode to %d", state);
         ret = 0; /* Power mode command just returns success */
+    } else if (os_strncasecmp(ctx->cmd, "GET_STA_STATISTICS ", 19) == 0) {
+        if (ctx->wpa_s)
+            ret = mediatek_handle_sta_stats_cmd(ctx->wpa_s, ctx->cmd + 19, ctx->buf, ctx->buf_len);
     } else if (os_strncasecmp(ctx->cmd, "MACADDR", os_strlen("MACADDR")) == 0) {
         u8 macaddr[ETH_ALEN] = {0};
         if (ctx->wpa_s) os_memcpy(macaddr, ctx->wpa_s->own_addr, ETH_ALEN);
