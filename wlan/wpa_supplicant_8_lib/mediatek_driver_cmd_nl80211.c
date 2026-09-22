@@ -1183,17 +1183,11 @@ int wpa_driver_nl80211_driver_cmd(void* priv, char* cmd, char* buf, size_t buf_l
             wpa_printf(MSG_ERROR, "MediaTek: Private command failed: %s, error: %s", cmd,
                        strerror(errno));
             return -1;
-        } else {
-            if ((os_strncasecmp(cmd, "WLS_BATCHING", 12) == 0)) {
-                /* Ensure null termination for batching command */
-                buf[buf_len - 1] = '\0';
-                ret = os_strlen(buf);
-            } else {
-                /* Copy response data from driver to our buffer */
-                os_strlcpy(buf, ctx.priv_cmd.buf, buf_len);
-                ret = os_strlen(buf);
-            }
         }
+
+        /* Copy response data from driver to our buffer */
+        os_strlcpy(buf, ctx.priv_cmd.buf, buf_len);
+        ret = os_strlen(buf);
     }
 
     return ret;
