@@ -22,6 +22,16 @@
 #define PRIV_CMD_SIZE 512
 #define MAX_ARGS 32
 
+#ifdef MAC2STR
+#undef MAC2STR
+#define MAC2STR(a) (a)[0], (a)[1], (a)[5]
+#endif
+
+#ifdef MACSTR
+#undef MACSTR
+#define MACSTR "%02x:%02x:*:*:*:%02x"
+#endif
+
 typedef struct android_wifi_priv_cmd {
     char buf[PRIV_CMD_SIZE];
     int used_len;
