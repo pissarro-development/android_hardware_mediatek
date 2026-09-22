@@ -1168,6 +1168,7 @@ int wpa_driver_nl80211_driver_cmd(void* priv, char* cmd, char* buf, size_t buf_l
  * Returns: 0 on success, -1 on failure
  */
 int wpa_driver_set_p2p_noa(void* priv, u8 count, int start, int duration) {
+    int ret;
     char cmd[64];
     char buf[64];
     struct i802_bss* bss = priv;
@@ -1175,7 +1176,10 @@ int wpa_driver_set_p2p_noa(void* priv, u8 count, int start, int duration) {
     wpa_printf(MSG_DEBUG, "MediaTek: Interface %s: P2P_SET_NOA count=%d start=%d duration=%d",
                bss->ifname, count, start, duration);
 
-    os_snprintf(cmd, sizeof(cmd), "P2P_SET_NOA %d %d %d", count, start, duration);
+    ret = os_snprintf(cmd, sizeof(cmd), "P2P_SET_NOA %d %d %d", count, start, duration);
+    if (os_snprintf_error(sizeof(cmd), ret))
+        return -1;
+
     return wpa_driver_nl80211_driver_cmd(priv, cmd, buf, sizeof(buf));
 }
 
@@ -1204,6 +1208,7 @@ int wpa_driver_get_p2p_noa(void* priv, u8* buf, size_t len) {
  * Returns: 0 on success, -1 on failure
  */
 int wpa_driver_set_p2p_ps(void* priv, int legacy_ps, int opp_ps, int ctwindow) {
+    int ret;
     char cmd[64];
     char buf[64];
     struct i802_bss* bss = priv;
@@ -1211,7 +1216,10 @@ int wpa_driver_set_p2p_ps(void* priv, int legacy_ps, int opp_ps, int ctwindow) {
     wpa_printf(MSG_DEBUG, "MediaTek: Interface %s: P2P_SET_PS legacy=%d opp=%d ctwindow=%d",
                bss->ifname, legacy_ps, opp_ps, ctwindow);
 
-    os_snprintf(cmd, sizeof(cmd), "P2P_SET_PS %d %d %d", legacy_ps, opp_ps, ctwindow);
+    ret = os_snprintf(cmd, sizeof(cmd), "P2P_SET_PS %d %d %d", legacy_ps, opp_ps, ctwindow);
+    if (os_snprintf_error(sizeof(cmd), ret))
+        return -1;
+
     return wpa_driver_nl80211_driver_cmd(priv, cmd, buf, sizeof(buf));
 }
 
