@@ -20,19 +20,13 @@
 #include "p2p/p2p_i.h"
 
 #define PRIV_CMD_SIZE 512
-#define MAX_DRIVER_CMD_LEN 512
 #define MAX_ARGS 32
-#define MAX_RESPONSE_LEN 2048
-#define MAX_CONSECUTIVE_ERRORS 5
 
 typedef struct android_wifi_priv_cmd {
     char buf[PRIV_CMD_SIZE];
     int used_len;
     int total_len;
 } android_wifi_priv_cmd;
-
-/* Track consecutive errors to detect driver hang */
-static int error_count = 0;
 
 /**
  * struct driver_cmd_context - Context for driver commands
@@ -44,7 +38,6 @@ struct driver_cmd_context {
     struct i802_bss* bss;
     struct wpa_driver_nl80211_data* drv;
     struct wpa_supplicant* wpa_s;
-    struct hostapd_data* hapd;
     char* cmd;
     size_t cmd_len;
     char* buf;
@@ -81,16 +74,9 @@ static int init_driver_cmd_context(struct driver_cmd_context* ctx, void* priv, c
         return -1;
     }
 
-    /* Determine if we're in station or AP mode */
-    if (ctx->drv->nlmode == NL80211_IFTYPE_AP) {
-        ctx->hapd = ctx->drv->ctx;
-    } else {
+    /* drv->ctx is a hostapd_data in AP mode */
+    if (ctx->drv->nlmode != NL80211_IFTYPE_AP)
         ctx->wpa_s = ctx->drv->ctx;
-    }
-
-    /* Initialize private command structure */
-    os_memset(&ctx->priv_cmd, 0, sizeof(ctx->priv_cmd));
-    os_memset(&ctx->ifr, 0, sizeof(ctx->ifr));
 
     return 0;
 }
@@ -101,7 +87,7 @@ static int init_driver_cmd_context(struct driver_cmd_context* ctx, void* priv, c
  *
  * Returns: Pointer to first non-space character in the string
  */
-char* skip_white_space(char* cmd) {
+static char* skip_white_space(char* cmd) {
     char* pos = cmd;
 
     while (*pos == ' ') pos++;
@@ -144,25 +130,6 @@ static int tokenize_cmd(char* cmd, char* argv[], int max_args) {
 }
 
 /**
- * track_driver_error - Track driver errors to detect potential hangs
- */
-static void track_driver_error(void) {
-    error_count++;
-    if (error_count > MAX_CONSECUTIVE_ERRORS) {
-        wpa_printf(MSG_WARNING,
-                   "MediaTek: Detected potential driver hang - reached max consecutive errors");
-        error_count = 0; /* Reset counter to avoid log spam */
-    }
-}
-
-/**
- * reset_error_counter - Reset the error counter on successful operations
- */
-static void reset_error_counter(void) {
-    error_count = 0;
-}
-
-/**
  * mediatek_send_command - Send command to driver via ioctl
  * @ctx: Driver command context
  * @cmd: Command string
@@ -187,11 +154,9 @@ static int mediatek_send_command(struct driver_cmd_context* ctx, const char* cmd
     if (ret < 0) {
         wpa_printf(MSG_ERROR, "MediaTek: Private command failed: %s, ret=%d, errno=%d(%s)", cmd,
                    ret, errno, strerror(errno));
-        track_driver_error();
         return ret;
     }
 
-    reset_error_counter();
     return 0;
 }
 
@@ -638,15 +603,13 @@ static int mediatek_get_station_stats(struct wpa_supplicant* wpa_s, u8* sta_addr
 
 /**
  * mediatek_format_station_stats - Format station statistics as text
- * @wpa_s: wpa_supplicant data
  * @stats: Station statistics data
  * @buf: Buffer to store formatted output
  * @buflen: Length of buffer
  *
  * Returns: Length of formatted data or 0 on error
  */
-static int mediatek_format_station_stats(struct wpa_supplicant* wpa_s,
-                                         struct wpa_driver_sta_statistics_s* stats, char* buf,
+static int mediatek_format_station_stats(struct wpa_driver_sta_statistics_s* stats, char* buf,
                                          size_t buflen) {
     int ret;
     size_t i;
@@ -825,13 +788,10 @@ static void mediatek_log_station_stats(struct wpa_driver_sta_statistics_s* s) {
  * mediatek_handle_p2p_noa_cmd - Handle P2P NoA command
  * @wpa_s: wpa_supplicant data
  * @cmd: Command string
- * @buf: Buffer for command response
- * @buflen: Length of buffer
  *
  * Returns: 0 on success, negative on failure
  */
-static int mediatek_handle_p2p_noa_cmd(struct wpa_supplicant* wpa_s, char* cmd, char* buf,
-                                       size_t buflen) {
+static int mediatek_handle_p2p_noa_cmd(struct wpa_supplicant* wpa_s, char* cmd) {
     char* argv[MAX_ARGS] = {0};
     int argc;
     struct wpa_driver_p2p_noa_params {
@@ -870,13 +830,10 @@ static int mediatek_handle_p2p_noa_cmd(struct wpa_supplicant* wpa_s, char* cmd, 
  * mediatek_handle_p2p_ps_cmd - Handle P2P power save command
  * @wpa_s: wpa_supplicant data
  * @cmd: Command string
- * @buf: Buffer for command response
- * @buflen: Length of buffer
  *
  * Returns: 0 on success, negative on failure
  */
-static int mediatek_handle_p2p_ps_cmd(struct wpa_supplicant* wpa_s, char* cmd, char* buf,
-                                      size_t buflen) {
+static int mediatek_handle_p2p_ps_cmd(struct wpa_supplicant* wpa_s, char* cmd) {
     char* argv[MAX_ARGS] = {0};
     int argc;
     int enable;
@@ -1123,10 +1080,10 @@ static int mediatek_process_driver_cmd(struct driver_cmd_context* ctx, int* hand
         ret = mediatek_send_command(ctx, ctx->cmd);
     } else if (os_strncmp(ctx->cmd, "P2P_SET_NOA", os_strlen("P2P_SET_NOA")) == 0) {
         if (ctx->wpa_s)
-            ret = mediatek_handle_p2p_noa_cmd(ctx->wpa_s, ctx->cmd, ctx->buf, ctx->buf_len);
+            ret = mediatek_handle_p2p_noa_cmd(ctx->wpa_s, ctx->cmd);
     } else if (os_strncmp(ctx->cmd, "P2P_SET_PS", os_strlen("P2P_SET_PS")) == 0) {
         if (ctx->wpa_s)
-            ret = mediatek_handle_p2p_ps_cmd(ctx->wpa_s, ctx->cmd, ctx->buf, ctx->buf_len);
+            ret = mediatek_handle_p2p_ps_cmd(ctx->wpa_s, ctx->cmd);
     } else if (os_strncasecmp(ctx->cmd, "SETSUSPENDMODE ", 15) == 0) {
         int suspend = *(ctx->cmd + 15) - '0';
         ret = mediatek_handle_suspendmode_cmd(ctx->bss, suspend);
@@ -1184,11 +1141,8 @@ int wpa_driver_nl80211_driver_cmd(void* priv, char* cmd, char* buf, size_t buf_l
         if (ret < 0) {
             wpa_printf(MSG_ERROR, "MediaTek: Private command failed: %s, error: %s", cmd,
                        strerror(errno));
-            track_driver_error();
             return -1;
         } else {
-            reset_error_counter();
-
             if ((os_strncasecmp(cmd, "WLS_BATCHING", 12) == 0)) {
                 /* Ensure null termination for batching command */
                 buf[buf_len - 1] = '\0';
@@ -1276,26 +1230,4 @@ int wpa_driver_set_ap_wps_p2p_ie(void* priv, const struct wpabuf* beacon,
 
     wpa_printf(MSG_DEBUG, "MediaTek: Interface %s: set_ap_wps_p2p_ie", bss->ifname);
     return 0; /* Function stubbed out, actual functionality not needed */
-}
-
-/**
- * nl80211_vendor_event_mtk - Process MediaTek vendor events
- * @drv: Driver private data
- * @subcmd: Vendor subcmd
- * @data: Event data
- * @len: Data length
- */
-void nl80211_vendor_event_mtk(struct wpa_driver_nl80211_data* drv, u32 subcmd, u8* data,
-                              size_t len) {
-    switch (subcmd) {
-        case WIFI_EVENT_DRIVER_ERROR:
-            wpa_printf(MSG_INFO, "MediaTek: Driver error notification received");
-            break;
-        case WIFI_EVENT_GENERIC_RESPONSE:
-            wpa_printf(MSG_DEBUG, "MediaTek: Generic driver response received");
-            break;
-        default:
-            wpa_printf(MSG_DEBUG, "MediaTek: Ignoring unsupported vendor event %u", subcmd);
-            break;
-    }
 }
